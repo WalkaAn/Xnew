@@ -1,0 +1,81 @@
+name: Extract ZIP
+
+# Upload file .zip ke root repo (bisa dari HP) -> otomatis di-extract,
+# folder paling luar dibuang, zip dihapus, lalu build dijalankan.
+
+on:
+  push:
+    paths:
+      - '*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: extract-zip
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract semua .zip di root repo
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(*.zip)
+
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "Tidak ada file .zip di root repo."
+            echo "extracted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for z in "${zips[@]}"; do
+            echo "==> Extract: $z"
+            tmp="$(mktemp -d)"
+            unzip -q -o "$z" -d "$tmp"
+            rm -rf "$tmp/__MACOSX"
+
+            # Kalau isi zip hanya 1 folder (mis. Repo-master/), buang folder itu
+            src="$tmp"
+            if [ "$(find "$tmp" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ] \
+               && [ -d "$(find "$tmp" -mindepth 1 -maxdepth 1)" ]; then
+              src="$(find "$tmp" -mindepth 1 -maxdepth 1)"
+            fi
+
+            if [ -d "$src/.github/workflows" ]; then
+              echo "::warning::.github/workflows di dalam zip dilewati (GITHUB_TOKEN tidak boleh mengubah workflow). Tambahkan manual lewat GitHub."
+            fi
+
+            rsync -a --exclude='/.git/' --exclude='/.github/workflows/' "$src"/ ./
+            git rm -q -f -- "$z"
+            rm -rf "$tmp"
+          done
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Tidak ada perubahan."
+            echo "extracted=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "Extract ZIP: ${zips[*]}"
+            git pull --rebase
+            git push
+            echo "extracted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Push dari GITHUB_TOKEN tidak memicu workflow lain, jadi build dipicu manual
+      - name: Jalankan build
+        if: steps.extract.outputs.extracted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build.yml --ref "${{ github.ref_name }}" || echo "build.yml belum ada, dilewati."
