@@ -1,0 +1,147 @@
+import com.android.build.api.artifact.SingleArtifact
+
+apply plugin: 'com.android.application'
+//apply plugin: 'dev.rikka.tools.refine.gradle-plugin'
+
+android {
+    signingConfigs {
+        release {
+            // for custom release signing keys
+            // 1. create `io.github.wzhy.xaudiocapture.signing.properties` under `~/.gradle`
+            // 2. populate with these values:
+            //   - STORE_FILE=/path/to/keystore.jks
+            //   - STORE_PASSWORD=super_secret_password
+            //   - KEY_ALIAS=your key alias
+            //   - KEY_PASSWORD=super_secret_password
+
+            def propsPath = System.getProperty("user.home") + "/.gradle/io.github.wzhy.xaudiocapture.signing.properties"
+            def propsFile = file(propsPath)
+            if (propsFile.canRead()) {
+                def props = new Properties()
+                props.load(new FileInputStream(propsFile))
+
+                storeFile file(props['STORE_FILE'])
+                storePassword props['STORE_PASSWORD']
+                keyAlias props['KEY_ALIAS']
+                keyPassword props['KEY_PASSWORD']
+            } else {
+                println "${propsPath} is missing"
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    dataBinding {
+        enabled true
+    }
+    compileSdk 37
+
+    packaging {
+        resources {
+            merges += "META-INF/xposed/*"
+            excludes += "**"
+        }
+    }
+
+    defaultConfig {
+        applicationId "io.github.wzhy.xaudiocapture"
+        minSdk 33
+        targetSdk 37
+        versionCode 1020
+        versionName '2.0.0'
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        project.ext.set("archivesBaseName", applicationId + "-" + versionName + "-" + versionCode)
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-dbg"
+        }
+        release {
+            if (signingConfigs.release.storeFile != null)
+                signingConfig signingConfigs.release
+            aaptOptions.cruncherEnabled = true
+            shrinkResources true
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = 11
+        targetCompatibility = 11
+    }
+
+    namespace 'io.github.wzhy.xaudiocapture'
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+    compileSdkMinor 0
+}
+
+androidComponents {
+    onVariants(selector().all(), { variant ->
+        def variantName = variant.name
+        def capitalizedName = variantName.capitalize()
+
+        def apkDirProvider = variant.artifacts.get(SingleArtifact.APK.INSTANCE)
+        def appIdProvider = variant.applicationId
+
+        def firstOutput = variant.outputs.isEmpty() ? null : variant.outputs[0]
+        def vNameProvider = firstOutput != null ? firstOutput.versionName : providers.provider { "1.0.1" }
+        def vCodeProvider = firstOutput != null ? firstOutput.versionCode : providers.provider { 1001 }
+
+        def archiveBuildTask = tasks.register("archive${capitalizedName}Apk", Copy) {
+            group 'archive'
+            description "Assembles and archives apk for the ${capitalizedName} build"
+
+            from apkDirProvider
+            into "${rootDir}/archive/${project.name}/"
+
+            include "**/*.apk"
+
+            eachFile { fileDetails ->
+                def appId = appIdProvider.get()
+                def vName = vNameProvider.getOrElse("")
+                def vCode = vCodeProvider.getOrElse(1001)
+                def version = vName ? "${vName}-${vCode}" : "${vCode}"
+
+                fileDetails.name = "${appId}-${version}-${fileDetails.name}"
+            }
+            includeEmptyDirs = false
+        }
+
+        afterEvaluate {
+            def assembleTask = tasks.findByName("assemble${capitalizedName}")
+            if (assembleTask != null) {
+                assembleTask.finalizedBy(archiveBuildTask)
+            }
+        }
+    })
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation('dev.rikka.tools.refine:runtime:4.4.0')
+
+    implementation 'com.google.android.material:material:1.14.0'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+    implementation 'androidx.navigation:navigation-fragment:2.9.8'
+    implementation 'androidx.navigation:navigation-ui:2.9.8'
+    implementation 'androidx.lifecycle:lifecycle-extensions:2.2.0'
+
+    compileOnly 'io.github.libxposed:api:102.0.0'
+    implementation("io.github.libxposed:service:102.0.0")
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
+}
