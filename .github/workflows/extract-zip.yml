@@ -10,9 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  ANDROID_HOME: ${{ github.workspace }}/android-sdk
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,7 +24,7 @@ jobs:
           set -euo pipefail
           ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
           if [ -z "$ZIP_FILE" ]; then
-            echo "Tidak ditemukan file ZIP di halaman utama repository."
+            echo "File ZIP tidak ditemukan di halaman utama repository."
             exit 1
           fi
           mkdir -p extracted-project
@@ -47,16 +44,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Android platform 37
+        run: sdkmanager "platforms;android-37"
+
       - name: Build Debug APK
         working-directory: ${{ steps.extract.outputs.project_dir }}
         shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon --stacktrace assembleDebug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
